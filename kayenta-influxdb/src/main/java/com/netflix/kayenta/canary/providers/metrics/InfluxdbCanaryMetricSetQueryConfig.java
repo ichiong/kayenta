@@ -19,6 +19,8 @@ package com.netflix.kayenta.canary.providers.metrics;
 import com.fasterxml.jackson.annotation.JsonTypeName;
 import com.netflix.kayenta.canary.CanaryMetricSetQueryConfig;
 import java.util.List;
+import java.util.Map;
+import javax.annotation.Nullable;
 import javax.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -38,6 +40,10 @@ public class InfluxdbCanaryMetricSetQueryConfig implements CanaryMetricSetQueryC
   @NotNull @Getter private String metricName;
 
   @Getter private List<String> fields;
+
+  @Nullable @Getter private Map<String, String> tags;
+
+  @Nullable @Getter private List<String> groupByFields;
 
   @Override
   public String getServiceType() {

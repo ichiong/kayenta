@@ -20,6 +20,7 @@ import com.netflix.kayenta.canary.CanaryScope;
 import com.netflix.kayenta.canary.providers.metrics.InfluxdbCanaryMetricSetQueryConfig;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -31,27 +32,40 @@ import org.springframework.util.CollectionUtils;
 public class InfluxDbQueryBuilder {
 
   private static final String ALL_FIELDS = "*::field";
+  private static final String GROUP_BY_STR = " GROUP BY ";
   private static final String SCOPE_INVALID_FORMAT_MSG =
       "Scope expected in the format of 'name:value'. e.g. autoscaling_group:myapp-prod-v002, received: ";
 
-  // TODO(joerajeev): update to accept tags and groupby fields
   // TODO(joerajeev): protect against injection. Influxdb is supposed to support binding params,
   // https://docs.influxdata.com/influxdb/v1.5/tools/api/
   public String build(InfluxdbCanaryMetricSetQueryConfig queryConfig, CanaryScope canaryScope) {
 
-    validateManadtoryParams(queryConfig, canaryScope);
+    validateMandatoryParams(queryConfig, canaryScope);
 
     StringBuilder query = new StringBuilder();
-    addBaseQuery(queryConfig.getMetricName(), handleFields(queryConfig), query);
-    addTimeRangeFilter(canaryScope, query);
-    addScopeFilter(canaryScope, query);
+    Boolean doTagsExist = false;
+
+    if (CollectionUtils.isEmpty(queryConfig.getTags())) {
+      addBaseQuery(queryConfig.getMetricName(), handleFields(queryConfig), doTagsExist, query);
+      addTimeRangeFilter(canaryScope, query);
+      addScopeFilter(canaryScope, query);
+      addGroupByStatement(queryConfig.getGroupByFields(), query);
+    } else {
+      doTagsExist = true;
+      addBaseQuery(queryConfig.getMetricName(), handleFields(queryConfig), doTagsExist, query);
+      addTimeRangeFilter(canaryScope, query);
+      addScopeFilter(canaryScope, query);
+      addTags(queryConfig, query);
+      addGroupByStatement(queryConfig.getGroupByFields(), query);
+    }
 
     String builtQuery = query.toString();
+
     log.debug("Built query: {} config: {} scope: {}", builtQuery, queryConfig, canaryScope);
     return builtQuery;
   }
 
-  private void validateManadtoryParams(
+  private void validateMandatoryParams(
       InfluxdbCanaryMetricSetQueryConfig queryConfig, CanaryScope canaryScope) {
     if (StringUtils.isEmpty(queryConfig.getMetricName())) {
       throw new IllegalArgumentException("Measurement is required to query metrics");
@@ -75,11 +89,31 @@ public class InfluxDbQueryBuilder {
     return fields;
   }
 
-  private void addBaseQuery(String measurement, List<String> fields, StringBuilder query) {
+  private void addTags(InfluxdbCanaryMetricSetQueryConfig queryConfig, StringBuilder query) {
+    Map<String, String> tags = queryConfig.getTags();
+    if (!CollectionUtils.isEmpty(tags)) {
+      String tagsAsString =
+          tags.entrySet().stream()
+              .map(key -> key.getKey() + "=" + String.format("'%s'", key.getValue()))
+              .collect(Collectors.joining(" AND "));
+      query.append(" AND ");
+      query.append(tagsAsString);
+    }
+  }
+
+  private void addBaseQuery(
+      String measurement, List<String> fields, Boolean tagExists, StringBuilder query) {
     query.append("SELECT ");
     query.append(fields.stream().collect(Collectors.joining(", ")));
     query.append(" FROM ");
     query.append(measurement);
+  }
+
+  private void addGroupByStatement(List<String> groupByFields, StringBuilder query) {
+    if (!CollectionUtils.isEmpty(groupByFields)) {
+      query.append(GROUP_BY_STR);
+      query.append(groupByFields.stream().collect(Collectors.joining(", ")));
+    }
   }
 
   private void addScopeFilter(CanaryScope canaryScope, StringBuilder sb) {
